@@ -1,0 +1,51 @@
+name: Build Debian Package
+
+on:
+  push:
+    tags: 
+      - 'v*'  # 只在标签推送时触发（例如 v1.0.0）
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-ubuntu:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        qt-version: ['5.15.2']  # 指定所需的Qt版本
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive  # 如果项目有子模块，需要递归检出
+
+    - name: Install Qt and dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y qtbase5-dev qttools5-dev-tools libqt5core5a cmake build-essential debhelper dh-make
+
+    - name: Install build dependencies
+      run: |
+        sudo mk-build-deps --install --remove debian/control
+
+    - name: Configure CMake
+      run: |
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+
+    - name: Build project
+      run: |
+        cd build
+        make -j$(nproc)
+
+    - name: Build Debian package
+      run: |
+        dpkg-buildpackage -us -uc  # 不签名软件包
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: mergesub-deb-package
+        path: ../*.deb
