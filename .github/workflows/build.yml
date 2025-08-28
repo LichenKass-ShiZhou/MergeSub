@@ -1,52 +1,133 @@
-name: Build Debian Package
+name: Build Qt CMake Project and Package as DEB
 
 on:
   push:
-    tags: 
-      - 'v*'  # 只在标签推送时触发（例如 v1.0.0）
+    tags:
+      - 'v*' # 仅当推送以 'v' 开头的标签时触发，例如 v1.0.0
   pull_request:
-    branches: [ main ]
-  workflow_dispatch:  # 允许手动触发工作流
+    branches: [ main, master ]
+  workflow_dispatch: # 允许手动触发
+
+env:
+  BUILD_TYPE: Release
+  QT_VERSION: '6.5.*' # 根据你的项目需求调整 Qt 版本，例如 5.12.11 或 6.5.*
+  PROJECT_NAME: 'mergesub' # 调整为你的项目名称，Debian 包名通常小写
+  VERSION: ${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
 
 jobs:
-  build-ubuntu:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        qt-version: ['5.15.2']  # 指定所需的Qt版本
-
+  build-and-package:
+    runs-on: ubuntu-22.04 # 推荐使用 LTS 版本
+    container:
+      image: ubuntu:22.04
+      options: --privileged
     steps:
-    - name: Checkout repository
+    - name: Checkout repository and submodules
       uses: actions/checkout@v4
       with:
-        submodules: recursive  # 如果项目有子模块，需要递归检出
+        submodules: 'recursive'
+        fetch-depth: 0
 
-    - name: Install Qt and dependencies
+    - name: Install essential dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y qtbase5-dev qttools5-dev-tools libqt5core5a cmake build-essential debhelper dh-make
+        apt-get update
+        apt-get install -y wget tar dh-make debmake debhelper lintian build-essential pkg-config cmake ninja-build
+        # 安装 Qt 相关的依赖，请根据你的项目实际需要调整
+        apt-get install -y libgl1-mesa-dev libxcb1-dev libgtk-3-dev
 
-    - name: Install build dependencies
-      run: |
-        sudo mk-build-deps --install --remove debian/control
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: ${{ env.QT_VERSION }}
+        cache: 'true'
+        # 如果你的项目使用特定的 Qt 模块，请在 install-qt-action 的 `modules` 或 `additional_packages` 参数中指定
 
     - name: Configure CMake
       run: |
         mkdir -p build
         cd build
-        cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+        cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE -GNinja ..
 
     - name: Build project
       run: |
         cd build
-        make -j$(nproc)
+        ninja -j$(nproc)
+
+    - name: Prepare debian packaging directory
+      run: |
+        # 设置维护者信息的环境变量，这些会用于打包
+        echo "DEBEMAIL=\"${{ secrets.DEB_EMAIL || 'your-email@example.com' }\"" >> ~/.bashrc
+        echo "DEBFULLNAME=\"${{ secrets.DEB_FULLNAME || 'Your Name' }\"" >> ~/.bashrc
+        echo "export DEBEMAIL DEBFULLNAME" >> ~/.bashrc
+        . ~/.bashrc
+
+        # 创建符合 Debian 规范的源码目录结构 :cite[3]:cite[8]
+        PACKAGE_NAME="$PROJECT_NAME"
+        PACKAGE_VERSION="$VERSION"
+        if [ "$PACKAGE_VERSION" = "latest" ]; then
+          PACKAGE_VERSION="0.0.0+git$(date +%Y%m%d)"
+        fi
+        cd ..
+        mkdir -p deb-package/$PACKAGE_NAME-$PACKAGE_VERSION
+        cp -r !(build|deb-package|.git) deb-package/$PACKAGE_NAME-$PACKAGE_VERSION/ || true
+        cd deb-package
+        tar -czf ${PACKAGE_NAME}_${PACKAGE_VERSION}.orig.tar.gz $PACKAGE_NAME-$PACKAGE_VERSION
+
+    - name: Generate debian package metadata
+      run: |
+        cd deb-package/$PACKAGE_NAME-$PACKAGE_VERSION
+        # 初始化 debian 目录 :cite[3]:cite[8]
+        dh_make -s -y --createorig --copyright mit || true # 使用合适的版权协议，mit 是示例
+
+        # 修改 debian/control 文件，根据你的项目描述和依赖调整
+        cat > debian/control <<EOF
+Source: $PACKAGE_NAME
+Section: utils
+Priority: optional
+Maintainer: $DEBFULLNAME <$DEBEMAIL>
+Build-Depends: debhelper-compat (= 13), cmake, ninja-build, qtbase5-dev | qt6-base-dev, libgl1-mesa-dev, libxcb1-dev
+Standards-Version: 4.6.2
+
+Package: $PACKAGE_NAME
+Architecture: any
+Depends: \${shlibs:Depends}, \${misc:Depends}
+Description: A tool for merging subtitles.
+ MergeSub is designed to merge subtitles with video files efficiently.
+EOF
+
+        # 简化 changelog，初始版本通常只需修改第一项
+        cat > debian/changelog <<EOF
+$PACKAGE_NAME ($PACKAGE_VERSION-1) unstable; urgency=medium
+
+  * Initial release (Closes: #XXXXXX)
+
+ -- $DEBFULLNAME <$DEBEMAIL>  $(date -R)
+EOF
+
+        # 确保 rules 文件具有可执行权限并使用 CMake
+        chmod +x debian/rules
+        # 通常 debian/rules 文件已经包含了必要的构建规则，但请根据你的项目检查
 
     - name: Build Debian package
       run: |
-        dpkg-buildpackage -us -uc  # 不签名软件包
+        cd deb-package/$PACKAGE_NAME-$PACKAGE_VERSION
+        # 构建 deb 包 :cite[3]:cite[8]
+        dpkg-buildpackage -uc -us -b
 
-    - name: Upload artifacts
+    - name: List generated artifacts
+      run: |
+        ls -la deb-package/*.deb deb-package/*.changes deb-package/*.buildinfo || true
+
+    - name: Store built DEB package as artifact
       uses: actions/upload-artifact@v4
       with:
-        name: mergesub-deb-package
-        path: ../*.deb
+        name: ${{ env.PROJECT_NAME }}-debian-package
+        path: deb-package/*.deb
+        if-no-files-found: error
+        retention-days: 7
+
+    # 可选：如果推送的是标签，则发布到 GitHub Release
+    - name: Upload to GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: deb-package/*.deb
