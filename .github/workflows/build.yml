@@ -20,7 +20,7 @@ on:
 
 env:
   BUILD_TYPE: ${{ github.event.inputs.build_type || 'Release' }}
-  APP_NAME: "MergeSub"  # 替换为你的应用名称
+  APP_NAME: "MergeSub"  # 请确保这是你的可执行文件名称
 
 jobs:
   build-and-package:
@@ -32,7 +32,7 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Install system dependencies
+    - name: Install system dependencies (including FUSE)
       run: |
         sudo apt-get update
         sudo apt-get install -y \
@@ -46,7 +46,8 @@ jobs:
           libxcb-image0 \
           libxcb-keysyms1 \
           libxcb-render-util0 \
-          patchelf  # 用于修改二进制文件依赖
+          patchelf \
+          libfuse2  # 关键：安装 libfuse2 以支持 AppImage 运行 [citation:2][citation:6][citation:7]
 
     - name: Install Qt using aqtinstall
       run: |
@@ -68,17 +69,31 @@ jobs:
         cd build
         make -j$(nproc)
 
-    - name: Download and setup linuxdeployqt
+    - name: Download linuxdeployqt
       run: |
-        # 下载 linuxdeployqt（使用较旧版本以避免glibc兼容性问题）[citation:4][citation:10]
-        wget https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage -O linuxdeployqt
-        chmod +x linuxdeployqt
-        sudo mv linuxdeployqt /usr/local/bin/
-        linuxdeployqt --version
+        # 下载 linuxdeployqt AppImage
+        wget -q https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage -O linuxdeployqt.AppImage
+        chmod +x linuxdeployqt.AppImage
+
+    - name: Extract linuxdeployqt (Alternative if FUSE issues persist)
+      run: |
+        # 如果直接运行仍存在问题，则提取 AppImage [citation:4][citation:9]
+        ./linuxdeployqt.AppImage --appimage-extract
+        mv squashfs-root linuxdeployqt-extracted
+        echo "$(pwd)/linuxdeployqt-extracted/usr/bin" >> $GITHUB_PATH # 将提取后的路径加入PATH
+
+    - name: Verify linuxdeployqt
+      run: |
+        # 尝试运行 linuxdeployqt 并检查版本
+        linuxdeployqt.AppImage --version || echo "直接运行可能失败，尝试使用提取版本..."
+        # 如果提取了，则使用提取版本检查
+        if [ -d "linuxdeployqt-extracted" ]; then
+          linuxdeployqt-extracted/usr/bin/linuxdeployqt --version || echo "请检查 linuxdeployqt"
+        fi
 
     - name: Prepare application bundle
       run: |
-        # 创建应用包目录
+        # 创建应用包目录结构
         mkdir -p appdir/usr/bin
         mkdir -p appdir/usr/lib
         mkdir -p appdir/usr/share/applications
@@ -86,52 +101,62 @@ jobs:
         
         # 复制可执行文件
         cp build/$APP_NAME appdir/usr/bin/
+        chmod +x appdir/usr/bin/$APP_NAME
         
         # 创建桌面文件
-        echo "[Desktop Entry]
+        cat > appdir/usr/share/applications/$APP_NAME.desktop << EOF
+        [Desktop Entry]
         Type=Application
         Name=$APP_NAME
         Exec=$APP_NAME
         Icon=$APP_NAME
-        Categories=Utility;" > appdir/usr/share/applications/$APP_NAME.desktop
+        Categories=Utility;
+        EOF
 
     - name: Set Qt environment variables
       run: |
         echo "PATH=$QT_DIR/bin:$PATH" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=$QT_DIR/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-        echo "QT_PLUGIN_PATH=$QT_DIR/plugins:$QT_PLUGIN_PATH" >> $GITHUB_ENV
-        echo "QML2_IMPORT_PATH=$QT_DIR/qml:$QML2_IMPORT_PATH" >> $GITHUB_ENV
+        echo "QT_PLUGIN_PATH=$QT_DIR/plugins" >> $GITHUB_ENV
+        echo "QML2_IMPORT_PATH=$QT_DIR/qml" >> $GITHUB_ENV
 
     - name: Package application with linuxdeployqt
       run: |
         cd appdir
-        linuxdeployqt usr/share/applications/$APP_NAME.desktop -appimage -verbose=1
-
-    - name: Move MergeSub folder to linuxdeployqt working directory
-      run: |
-        # 创建目标目录（如果需要）
-        mkdir -p appdir/usr/share/$APP_NAME
-        
-        # 移动MergeSub文件夹到linuxdeployqt工作目录[citation:3][citation:6][citation:9]
-        if [ -d "MergeSub" ]; then
-          mv MergeSub/* appdir/usr/share/$APP_NAME/
-          echo "Moved MergeSub folder contents to appdir/usr/share/$APP_NAME/"
+        # 尝试使用直接下载的 AppImage，若失败则使用提取版本
+        linuxdeployqt.AppImage usr/share/applications/$APP_NAME.desktop -appimage -verbose=2 || \
+        if [ -f "../linuxdeployqt-extracted/usr/bin/linuxdeployqt" ]; then
+          echo "使用提取的 linuxdeployqt..."
+          ../linuxdeployqt-extracted/usr/bin/linuxdeployqt usr/share/applications/$APP_NAME.desktop -appimage -verbose=2
         else
-          echo "MergeSub folder not found, skipping move operation"
+          echo "linuxdeployqt 未找到，打包失败。"
+          exit 1
         fi
 
-    - name: Create final AppImage
+    - name: Move MergeSub folder and repackage (if needed)
       run: |
-        cd appdir
-        # 重新运行linuxdeployqt以确保所有文件包括MergeSub都被打包
-        linuxdeployqt usr/share/applications/$APP_NAME.desktop -appimage -verbose=1
-        mv *.AppImage $APP_NAME-${{ env.BUILD_TYPE }}.AppImage
+        # 检查是否存在 MergeSub 文件夹并移动
+        if [ -d "MergeSub" ]; then
+          echo "Moving MergeSub folder into the appdir..."
+          mkdir -p appdir/usr/share/$APP_NAME
+          cp -r MergeSub/* appdir/usr/share/$APP_NAME/
+          # 移动后可能需要重新运行 linuxdeployqt 以确保资源被打包
+          cd appdir
+          # 再次运行 linuxdeployqt 更新 AppImage
+          linuxdeployqt.AppImage usr/share/applications/$APP_NAME.desktop -appimage -verbose=2 || \
+          if [ -f "../linuxdeployqt-extracted/usr/bin/linuxdeployqt" ]; then
+            ../linuxdeployqt-extracted/usr/bin/linuxdeployqt usr/share/applications/$APP_NAME.desktop -appimage -verbose=2
+          fi
+          cd ..
+        else
+          echo "MergeSub folder not found. Skipping."
+        fi
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: $APP_NAME-${{ github.sha }}-${{ env.BUILD_TYPE }}
+        name: $APP_NAME-Build-${{ github.run_id }}
         path: |
-          appdir/$APP_NAME-${{ env.BUILD_TYPE }}.AppImage
+          appdir/*.AppImage
           build/$APP_NAME
         if-no-files-found: error
