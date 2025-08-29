@@ -1,4 +1,4 @@
-name: Build and Package Qt CMake Project as DEB
+name: Build and Package Qt CMake Project
 
 on:
   push:
@@ -49,9 +49,10 @@ jobs:
           libxcb-keysyms1 \
           libxcb-render-util0 \
           patchelf \
-          dh-make \
-          devscripts \
-          debhelper
+          libfuse2 \
+          qt6-base-dev \
+          qt6-tools-dev \
+          qt6-tools-dev-tools
 
     - name: Install Qt using aqtinstall
       run: |
@@ -66,7 +67,6 @@ jobs:
         cd build
         cmake -DCMAKE_PREFIX_PATH=$QT_DIR \
               -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-              -DCMAKE_INSTALL_PREFIX=/usr \
               ..
 
     - name: Build project
@@ -74,83 +74,102 @@ jobs:
         cd build
         make -j$(nproc)
 
-    - name: Create DEB package structure
+    - name: Clone linuxdeployqt
       run: |
-        # 创建 DEB 包目录结构
-        mkdir -p deb-package/DEBIAN
-        mkdir -p deb-package/usr/bin
-        mkdir -p deb-package/usr/share/applications
-        mkdir -p deb-package/usr/share/icons/hicolor/256x256/apps
-        mkdir -p deb-package/usr/share/$APP_NAME
+        git clone https://github.com/probonopd/linuxdeployqt.git
+        cd linuxdeployqt
+
+    - name: Modify linuxdeployqt source code
+      run: |
+        cd linuxdeployqt
+        # 注释掉 glibc 版本检查代码
+        sed -i '/if (strverscmp (glcv, "2.36") >= 0) {/,/return 1;/s/^/\/\//' tools/linuxdeployqt/main.cpp
+        echo "Glibc version check commented out in linuxdeployqt"
+
+    - name: Build linuxdeployqt
+      run: |
+        cd linuxdeployqt
+        # 使用系统的 Qt 工具链构建 linuxdeployqt
+        qmake
+        make -j$(nproc)
+        sudo cp linuxdeployqt/linuxdeployqt /usr/local/bin/
+        echo "linuxdeployqt built and installed to /usr/local/bin/"
+
+    - name: Create linuxdeployqt working directory
+      run: |
+        # 创建专门的工作目录
+        mkdir -p linuxdeployqt-workdir/usr/bin
+        mkdir -p linuxdeployqt-workdir/usr/lib
+        mkdir -p linuxdeployqt-workdir/usr/share/applications
+        mkdir -p linuxdeployqt-workdir/usr/share/icons/hicolor/256x256/apps
+        mkdir -p linuxdeployqt-workdir/usr/share/$APP_NAME
         
         # 复制可执行文件
-        cp build/$APP_NAME deb-package/usr/bin/
-        chmod +x deb-package/usr/bin/$APP_NAME
+        cp build/$APP_NAME linuxdeployqt-workdir/usr/bin/
+        chmod +x linuxdeployqt-workdir/usr/bin/$APP_NAME
         
         # 复制 MergeSub 文件夹内容（如果存在）
         if [ -d "MergeSub" ]; then
-          cp -r MergeSub/* deb-package/usr/share/$APP_NAME/
+          cp -r MergeSub/* linuxdeployqt-workdir/usr/share/$APP_NAME/
           echo "Copied MergeSub folder contents to /usr/share/$APP_NAME/"
         elif [ -d "build/MergeSub" ]; then
-          cp -r build/MergeSub/* deb-package/usr/share/$APP_NAME/
+          cp -r build/MergeSub/* linuxdeployqt-workdir/usr/share/$APP_NAME/
           echo "Copied build/MergeSub folder contents to /usr/share/$APP_NAME/"
         else
           echo "MergeSub folder not found, skipping copy operation"
         fi
         
         # 创建桌面文件
-        echo "[Desktop Entry]" > deb-package/usr/share/applications/$APP_NAME.desktop
-        echo "Type=Application" >> deb-package/usr/share/applications/$APP_NAME.desktop
-        echo "Name=$APP_NAME" >> deb-package/usr/share/applications/$APP_NAME.desktop
-        echo "Exec=$APP_NAME" >> deb-package/usr/share/applications/$APP_NAME.desktop
-        echo "Icon=$APP_NAME" >> deb-package/usr/share/applications/$APP_NAME.desktop
-        echo "Categories=Utility;" >> deb-package/usr/share/applications/$APP_NAME.desktop
+        echo "[Desktop Entry]" > linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
+        echo "Type=Application" >> linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
+        echo "Name=$APP_NAME" >> linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
+        echo "Exec=$APP_NAME" >> linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
+        echo "Icon=$APP_NAME" >> linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
+        echo "Categories=Utility;" >> linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
 
-    - name: Create DEB control file
+    - name: Set Qt environment variables
       run: |
-        # 创建控制文件
-        echo "Package: $APP_NAME" > deb-package/DEBIAN/control
-        echo "Version: $VERSION" >> deb-package/DEBIAN/control
-        echo "Section: utils" >> deb-package/DEBIAN/control
-        echo "Priority: optional" >> deb-package/DEBIAN/control
-        echo "Architecture: amd64" >> deb-package/DEBIAN/control
-        echo "Depends: libgl1-mesa-dev, libxkbcommon-x11-0, libdbus-1-3, libfontconfig1, libxrender1" >> deb-package/DEBIAN/control
-        echo "Maintainer: Your Name <your.email@example.com>" >> deb-package/DEBIAN/control
-        echo "Description: A Qt application built with CMake" >> deb-package/DEBIAN/control
-        echo " $APP_NAME is a Qt-based application that provides useful functionality." >> deb-package/DEBIAN/control
+        echo "PATH=$QT_DIR/bin:$PATH" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=$QT_DIR/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+        echo "QT_PLUGIN_PATH=$QT_DIR/plugins" >> $GITHUB_ENV
+        echo "QML2_IMPORT_PATH=$QT_DIR/qml" >> $GITHUB_ENV
 
-    - name: Create post-install and pre-remove scripts
+    - name: Run linuxdeployqt to collect dependencies
       run: |
-        # 创建安装后脚本（可选）
-        echo "#!/bin/bash" > deb-package/DEBIAN/postinst
-        echo "# Update icon cache" >> deb-package/DEBIAN/postinst
-        echo "if [ -x \"\$(command -v update-desktop-database)\" ]; then" >> deb-package/DEBIAN/postinst
-        echo "    update-desktop-database /usr/share/applications" >> deb-package/DEBIAN/postinst
-        echo "fi" >> deb-package/DEBIAN/postinst
-        echo "if [ -x \"\$(command -v gtk-update-icon-cache)\" ]; then" >> deb-package/DEBIAN/postinst
-        echo "    gtk-update-icon-cache /usr/share/icons/hicolor" >> deb-package/DEBIAN/postinst
-        echo "fi" >> deb-package/DEBIAN/postinst
+        cd linuxdeployqt-workdir
+        # 使用 linuxdeployqt 收集依赖
+        linuxdeployqt usr/share/applications/$APP_NAME.desktop -appimage -verbose=2
         
-        # 创建卸载前脚本（可选）
-        echo "#!/bin/bash" > deb-package/DEBIAN/prerm
-        echo "# Clean up application data" >> deb-package/DEBIAN/prerm
-        echo "rm -rf /usr/share/$APP_NAME" >> deb-package/DEBIAN/prerm
-        
-        # 设置脚本可执行权限
-        chmod +x deb-package/DEBIAN/postinst
-        chmod +x deb-package/DEBIAN/prerm
+        # 如果直接运行失败，尝试使用提取的二进制文件
+        if [ $? -ne 0 ]; then
+          echo "linuxdeployqt failed, trying alternative approach..."
+          # 尝试使用 qmake 找到的 Qt 路径
+          QMAKE_PATH=$(which qmake)
+          if [ -n "$QMAKE_PATH" ]; then
+            QT_BIN_DIR=$(dirname "$QMAKE_PATH")
+            export PATH="$QT_BIN_DIR:$PATH"
+          fi
+          # 再次尝试运行
+          linuxdeployqt usr/share/applications/$APP_NAME.desktop -appimage -verbose=2
+        fi
 
-    - name: Build DEB package
+    - name: Create final AppImage
       run: |
-        # 使用 dpkg-deb 构建 DEB 包
-        dpkg-deb --build deb-package
-        mv deb-package.deb $APP_NAME-$VERSION-amd64.deb
+        cd linuxdeployqt-workdir
+        # 确保 AppImage 已创建
+        if [ -f *.AppImage ]; then
+          mv *.AppImage ../$APP_NAME-$VERSION.AppImage
+          echo "AppImage created successfully"
+        else
+          echo "No AppImage found, packaging failed"
+          exit 1
+        fi
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: $APP_NAME-DEB-${{ github.run_id }}
+        name: $APP_NAME-AppImage-${{ github.run_id }}
         path: |
-          $APP_NAME-$VERSION-amd64.deb
+          $APP_NAME-$VERSION.AppImage
           build/$APP_NAME
         if-no-files-found: error
