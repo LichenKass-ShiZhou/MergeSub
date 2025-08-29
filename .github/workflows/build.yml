@@ -5,7 +5,7 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch: # 允许手动触发工作流[citation:1][citation:6]
+  workflow_dispatch:
     inputs:
       build_type:
         description: 'Build type'
@@ -45,20 +45,30 @@ jobs:
           libxcb-keysyms1 \
           libxcb-render-util0
 
-    - name: Install Qt
-      uses: jurplel/install-qt-action@v3
+    - name: Setup Python
+      uses: actions/setup-python@v5
       with:
-        version: '6.5.3'
-        arch: 'gcc_64'
-        cache: true
-        install-deps: false
-        modules: 'qtbase qtdeclarative qtmultimedia qtsvg'
+        python-version: '3.11'
+
+    - name: Install aqtinstall
+      run: pip install aqtinstall
+
+    - name: Install Qt
+      run: |
+        aqt install-qt linux desktop 6.5.3 gcc_64 -O /opt/qt
+      env:
+        QT_PATH: /opt/qt/6.5.3/gcc_64
+
+    - name: Set environment variables for Qt
+      run: |
+        echo "QT_PATH=/opt/qt/6.5.3/gcc_64" >> $GITHUB_ENV
+        echo "/opt/qt/6.5.3/gcc_64/bin" >> $GITHUB_PATH
 
     - name: Configure project
       run: |
         mkdir -p build
         cd build
-        cmake -DCMAKE_PREFIX_PATH=${{ env.QT_PATH }} \
+        cmake -DCMAKE_PREFIX_PATH=$QT_PATH \
               -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
               -DCMAKE_CXX_FLAGS="-Werror" \
               ..
