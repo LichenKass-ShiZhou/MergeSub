@@ -43,27 +43,32 @@ jobs:
           sed -i '/cmake_minimum_required/aproject(linuxdeployqt)' CMakeLists.txt
           fi
 
-      # 第四步：安装 Qt5 和必要的依赖
+      # 第四步 安装 Qt5 和必要的依赖
       - name: Install Qt5 and dependencies
         run: |
           sudo apt-get update
-          # 安装基本的 Qt5 开发依赖
-          sudo apt-get install -y qt5-default qtbase5-dev libqt5core5a libqt5gui5 libqt5widgets5
-          # 获取 Qt5 的安装路径，用于设置 CMAKE_PREFIX_PATH
-          QTDIR=$(find /usr -name "qt5-config.cmake" 2>/dev/null | head -n1 | xargs dirname | xargs dirname)
-          echo "QTDIR=$QTDIR" >> $GITHUB_ENV
-    
-      # 第五步：构建项目
+          # 安装 Qt5 开发包和其他必要的依赖
+          sudo apt-get install -y qtbase5-dev qt5-qmake qtchooser qtbase5-dev-tools libgl1-mesa-dev
+          # 可选：如果您还需要 Qt Creator，可以取消下一行的注释
+          # sudo apt-get install -y qtcreator
+          # 查找 qmake 的实际路径并将其设置为默认
+          QMAKE_PATH=$(which qmake-qt5 || echo "/usr/lib/qt5/bin/qmake")
+          echo "QMAKE_PATH=$QMAKE_PATH" >> $GITHUB_ENV
+          # 设置 QT_SELECT 环境变量以选择 Qt5
+          echo "QT_SELECT=qt5" >> $GITHUB_ENV
+
+      # 第五步 构建项目
       - name: Build project
         run: |
           cd linuxdeployqt/tools/linuxdeployqt
-          # 配置项目，设置 Qt5 的路径
-          cmake . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=$QTDIR
+          # 配置项目，显式指定 qmake 路径（如果需要）
+          cmake . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/usr/lib/x86_64-linux-gnu/qt5/
+          # 或者尝试直接使用 make 并指定 QT_SELECT
           # 编译项目
           make -j$(nproc)
           # 安装到临时目录并列出文件
           make DESTDIR=appdir -j$(nproc) install
           find appdir/
-          env:
-          # 使用之前找到的 Qt 路径
-          QTDIR: ${{ env.QTDIR }}
+        env:
+          # 传递环境变量
+          QT_SELECT: ${{ env.QT_SELECT }}
