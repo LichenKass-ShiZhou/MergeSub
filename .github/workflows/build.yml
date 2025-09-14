@@ -1,9 +1,7 @@
 name: Build linuxdeployqt
 
 on:
-  # 允许手动触发工作流
   workflow_dispatch:
-    # 可选的输入参数
     inputs:
       build-type:
         description: '构建类型'
@@ -30,57 +28,63 @@ jobs:
       - name: Fix main.cpp syntax errors
         run: |
           cd linuxdeployqt/tools/linuxdeployqt
-          # 恢复 main.cpp 到原始状态（重新克隆）
+          # 恢复原始文件
           git checkout -- main.cpp
           
-          # 使用更精确的方法注释掉 glibc 版本检查
-          # 找到要注释的代码行范围
+          # 使用更安全的方法修改 glibc 检查
+          # 找到要修改的代码行
           START_LINE=$(grep -n "if (strverscmp (glcv, \"2.36\") >= 0)" main.cpp | cut -d: -f1)
           if [ -n "$START_LINE" ]; then
               # 找到对应的结束大括号
-              END_LINE=$(sed -n "$START_LINE,\$p" main.cpp | grep -n -m1 "^        }$" | cut -d: -f1)
-              END_LINE=$((START_LINE + END_LINE - 1))
+              END_LINE=$(awk "NR>=$START_LINE && /^        }\$/ {print NR; exit}" main.cpp)
               
-              # 注释掉这个代码块
-              sed -i "${START_LINE},${END_LINE}s/^/\/\//" main.cpp
-          fi
-          
-      # 第三步：修复 CMakeLists.txt 文件结构
-      - name: Fix CMakeLists.txt structure
-        run: |
-          cd linuxdeployqt/tools/linuxdeployqt
-          # 确保文件开头有 project() 命令，且在 cmake_minimum_required() 之后
-          if ! grep -q "^project(" CMakeLists.txt; then
-          # 如果还没有 project() 命令，在 cmake_minimum_required 之后添加
-          sed -i '/cmake_minimum_required/aproject(linuxdeployqt)' CMakeLists.txt
+              # 创建一个备份
+              cp main.cpp main.cpp.backup
+              
+              # 使用 awk 来修改代码，确保不破坏语法
+              awk -v start="$START_LINE" -v end="$END_LINE" '
+              NR >= start && NR <= end {
+                  if (NR == start) {
+                      print "        if (0) { // Disabled glibc version check"
+                  } else {
+                      print "        //" $0
+                  }
+                  next
+              }
+              { print }
+              ' main.cpp.backup > main.cpp
           fi
 
-      # 第四步 安装 Qt5 和必要的依赖
+      # 第三步：在 CMakeLists.txt 文件中添加 CMake 最低版本要求
+      - name: Add CMake minimum version requirement
+        run: |
+          cd linuxdeployqt/tools/linuxdeployqt
+          # 在 CMakeLists.txt 文件开头添加 cmake_minimum_required(VERSION 3.31)
+          if ! grep -q "cmake_minimum_required" CMakeLists.txt; then
+              sed -i '1icmake_minimum_required(VERSION 3.31)' CMakeLists.txt
+          fi
+          
+          # 添加 project() 命令
+          if ! grep -q "^project(" CMakeLists.txt; then
+              sed -i '/cmake_minimum_required/aproject(linuxdeployqt)' CMakeLists.txt
+          fi
+
+      # 第四步：安装 Qt5 和必要的依赖
       - name: Install Qt5 and dependencies
         run: |
           sudo apt-get update
-          # 安装 Qt5 开发包和其他必要的依赖
           sudo apt-get install -y qtbase5-dev qt5-qmake qtchooser qtbase5-dev-tools libgl1-mesa-dev
-          # 可选：如果您还需要 Qt Creator，可以取消下一行的注释
-          # sudo apt-get install -y qtcreator
-          # 查找 qmake 的实际路径并将其设置为默认
           QMAKE_PATH=$(which qmake-qt5 || echo "/usr/lib/qt5/bin/qmake")
           echo "QMAKE_PATH=$QMAKE_PATH" >> $GITHUB_ENV
-          # 设置 QT_SELECT 环境变量以选择 Qt5
           echo "QT_SELECT=qt5" >> $GITHUB_ENV
 
-      # 第五步 构建项目
+      # 第五步：构建项目
       - name: Build project
         run: |
           cd linuxdeployqt/tools/linuxdeployqt
-          # 配置项目，显式指定 qmake 路径（如果需要）
           cmake . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/usr/lib/x86_64-linux-gnu/qt5/
-          # 或者尝试直接使用 make 并指定 QT_SELECT
-          # 编译项目
           make -j$(nproc)
-          # 安装到临时目录并列出文件
           make DESTDIR=appdir -j$(nproc) install
           find appdir/
         env:
-          # 传递环境变量
           QT_SELECT: ${{ env.QT_SELECT }}
