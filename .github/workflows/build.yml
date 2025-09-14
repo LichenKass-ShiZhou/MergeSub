@@ -39,3 +39,15 @@ jobs:
           cd linuxdeployqt/tools/linuxdeployqt
           # 在 CMakeLists.txt 文件开头添加 cmake_minimum_required(VERSION 3.31)
           sed -i '1icmake_minimum_required(VERSION 3.31)' CMakeLists.tx
+
+      # 第四步：构建项目
+      - name: Build project
+        run: |
+          cd linuxdeployqt/tools/linuxdeployqt
+          # 配置项目
+          cmake . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          # 编译项目
+          make -j$(nproc)
+          # 安装到临时目录并列出文件
+          make DESTDIR=appdir -j$(nproc) install
+          find appdir/
