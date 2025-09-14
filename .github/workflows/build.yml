@@ -29,31 +29,8 @@ jobs:
         run: |
           cd linuxdeployqt/tools/linuxdeployqt
           # 恢复原始文件
-          git checkout -- main.cpp
-          
-          # 使用更安全的方法修改 glibc 检查
-          # 找到要修改的代码行
-          START_LINE=$(grep -n "if (strverscmp (glcv, \"2.36\") >= 0)" main.cpp | cut -d: -f1)
-          if [ -n "$START_LINE" ]; then
-              # 找到对应的结束大括号
-              END_LINE=$(awk "NR>=$START_LINE && /^        }\$/ {print NR; exit}" main.cpp)
-              
-              # 创建一个备份
-              cp main.cpp main.cpp.backup
-              
-              # 使用 awk 来修改代码，确保不破坏语法
-              awk -v start="$START_LINE" -v end="$END_LINE" '
-              NR >= start && NR <= end {
-                  if (NR == start) {
-                      print "        if (0) { // Disabled glibc version check"
-                  } else {
-                      print "        //" $0
-                  }
-                  next
-              }
-              { print }
-              ' main.cpp.backup > main.cpp
-          fi
+          git checkout -- main.cpp 
+          sed -i '/if (strverscmp (glcv, "2.36") >= 0) {/,/^        }$/ s/^/\/\//' main.cpp
 
       # 第三步：在 CMakeLists.txt 文件中添加 CMake 最低版本要求
       - name: Add CMake minimum version requirement
