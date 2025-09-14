@@ -1,4 +1,4 @@
-name: Build MergeSub
+name: Build linuxdeployqt
 
 on:
   # 允许手动触发工作流
@@ -19,9 +19,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 第一步：克隆 linuxdeployqt 仓库
+      # 第一步：克隆 linuxdeployqt 仓库并进入指定目录
       - name: Clone linuxdeployqt repository
         run: |
           git clone https://github.com/probonopd/linuxdeployqt.git
-          cd linuxdeployqt
+          cd linuxdeployqt/tools/linuxdeployqt
           git submodule update --init --recursive
+          
+      # 第二步：注释掉 glibc 版本检查代码
+      - name: Disable glibc version check
+        run: |
+          cd linuxdeployqt/tools/linuxdeployqt
+          # 使用 sed 命令注释掉指定的代码块
+          sed -i '/if (strverscmp (glcv, "2.36") >= 0) {/,/return 1;/ s/^/\/\//' main.cpp
