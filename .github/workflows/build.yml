@@ -32,3 +32,10 @@ jobs:
           cd linuxdeployqt/tools/linuxdeployqt
           # 使用 sed 命令注释掉指定的代码块
           sed -i '/if (strverscmp (glcv, "2.36") >= 0) {/,/^        }$/ s/^/\/\//' main.cpp
+          
+      # 第三步：在 CMakeLists.txt 文件中添加 CMake 最低版本要求
+      - name: Add CMake minimum version requirement
+        run: |
+          cd linuxdeployqt/tools/linuxdeployqt
+          # 在 CMakeLists.txt 文件开头添加 cmake_minimum_required(VERSION 3.31)
+          sed -i '1icmake_minimum_required(VERSION 3.31)' CMakeLists.tx
