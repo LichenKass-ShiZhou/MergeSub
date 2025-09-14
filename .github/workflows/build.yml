@@ -26,12 +26,24 @@ jobs:
           cd linuxdeployqt/tools/linuxdeployqt
           git submodule update --init --recursive
           
-      # 第二步：注释掉 glibc 版本检查代码
-      - name: Disable glibc version check
+      # 第二步：修复 main.cpp 中的语法错误
+      - name: Fix main.cpp syntax errors
         run: |
           cd linuxdeployqt/tools/linuxdeployqt
-          # 使用 sed 命令注释掉指定的代码块
-          sed -i '/if (strverscmp (glcv, "2.36") >= 0) {/,/^        }$/ s/^/\/\//' main.cpp
+          # 恢复 main.cpp 到原始状态（重新克隆）
+          git checkout -- main.cpp
+          
+          # 使用更精确的方法注释掉 glibc 版本检查
+          # 找到要注释的代码行范围
+          START_LINE=$(grep -n "if (strverscmp (glcv, \"2.36\") >= 0)" main.cpp | cut -d: -f1)
+          if [ -n "$START_LINE" ]; then
+              # 找到对应的结束大括号
+              END_LINE=$(sed -n "$START_LINE,\$p" main.cpp | grep -n -m1 "^        }$" | cut -d: -f1)
+              END_LINE=$((START_LINE + END_LINE - 1))
+              
+              # 注释掉这个代码块
+              sed -i "${START_LINE},${END_LINE}s/^/\/\//" main.cpp
+          fi
           
       # 第三步：修复 CMakeLists.txt 文件结构
       - name: Fix CMakeLists.txt structure
