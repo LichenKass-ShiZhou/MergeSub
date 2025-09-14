@@ -1,175 +1,27 @@
-name: Build and Package Qt CMake Project
+name: Build MergeSub
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+  # 允许手动触发工作流
   workflow_dispatch:
+    # 可选的输入参数
     inputs:
-      build_type:
-        description: 'Build type'
+      build-type:
+        description: '构建类型'
         required: false
-        default: 'Release'
+        default: 'release'
         type: choice
         options:
-        - Debug
-        - Release
-        - RelWithDebInfo
-        - MinSizeRel
-
-env:
-  BUILD_TYPE: ${{ github.event.inputs.build_type || 'Release' }}
-  APP_NAME: "MergeSub"
-  VERSION: "1.0.0"
+          - release
+          - debug
 
 jobs:
-  build-and-package:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          cmake \
-          libgl1-mesa-dev \
-          libxkbcommon-x11-0 \
-          libdbus-1-3 \
-          libfontconfig1 \
-          libxrender1 \
-          libxcb-icccm4 \
-          libxcb-image0 \
-          libxcb-keysyms1 \
-          libxcb-render-util0 \
-          patchelf \
-          libfuse2 \
-          qt6-base-dev \
-          qt6-tools-dev \
-          qt6-tools-dev-tools
-
-    - name: Install Qt using aqtinstall
-      run: |
-        python3 -m pip install aqtinstall
-        aqt install-qt linux desktop 6.5.3 -O /opt/qt
-        echo "QT_DIR=/opt/qt/6.5.3/gcc_64" >> $GITHUB_ENV
-        echo "/opt/qt/6.5.3/gcc_64/bin" >> $GITHUB_PATH
-
-    - name: Configure project
-      run: |
-        mkdir -p build
-        cd build
-        cmake -DCMAKE_PREFIX_PATH=$QT_DIR \
-              -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-              ..
-
-    - name: Build project
-      run: |
-        cd build
-        make -j$(nproc)
-
-    - name: Clone linuxdeployqt
-      run: |
-        git clone https://github.com/probonopd/linuxdeployqt.git
-        cd linuxdeployqt
-
-    - name: Modify linuxdeployqt source code
-      run: |
-        cd linuxdeployqt
-        # 注释掉 glibc 版本检查代码
-        sed -i '/if (strverscmp (glcv, "2.36") >= 0) {/,/return 1;/s/^/\/\//' tools/linuxdeployqt/main.cpp
-        echo "Glibc version check commented out in linuxdeployqt"
-
-    - name: Build linuxdeployqt
-      run: |
-        cd linuxdeployqt
-        # 使用系统的 Qt 工具链构建 linuxdeployqt
-        qmake
-        make -j$(nproc)
-        sudo cp linuxdeployqt/linuxdeployqt /usr/local/bin/
-        echo "linuxdeployqt built and installed to /usr/local/bin/"
-
-    - name: Create linuxdeployqt working directory
-      run: |
-        # 创建专门的工作目录
-        mkdir -p linuxdeployqt-workdir/usr/bin
-        mkdir -p linuxdeployqt-workdir/usr/lib
-        mkdir -p linuxdeployqt-workdir/usr/share/applications
-        mkdir -p linuxdeployqt-workdir/usr/share/icons/hicolor/256x256/apps
-        mkdir -p linuxdeployqt-workdir/usr/share/$APP_NAME
-        
-        # 复制可执行文件
-        cp build/$APP_NAME linuxdeployqt-workdir/usr/bin/
-        chmod +x linuxdeployqt-workdir/usr/bin/$APP_NAME
-        
-        # 复制 MergeSub 文件夹内容（如果存在）
-        if [ -d "MergeSub" ]; then
-          cp -r MergeSub/* linuxdeployqt-workdir/usr/share/$APP_NAME/
-          echo "Copied MergeSub folder contents to /usr/share/$APP_NAME/"
-        elif [ -d "build/MergeSub" ]; then
-          cp -r build/MergeSub/* linuxdeployqt-workdir/usr/share/$APP_NAME/
-          echo "Copied build/MergeSub folder contents to /usr/share/$APP_NAME/"
-        else
-          echo "MergeSub folder not found, skipping copy operation"
-        fi
-        
-        # 创建桌面文件
-        echo "[Desktop Entry]" > linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
-        echo "Type=Application" >> linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
-        echo "Name=$APP_NAME" >> linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
-        echo "Exec=$APP_NAME" >> linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
-        echo "Icon=$APP_NAME" >> linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
-        echo "Categories=Utility;" >> linuxdeployqt-workdir/usr/share/applications/$APP_NAME.desktop
-
-    - name: Set Qt environment variables
-      run: |
-        echo "PATH=$QT_DIR/bin:$PATH" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=$QT_DIR/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-        echo "QT_PLUGIN_PATH=$QT_DIR/plugins" >> $GITHUB_ENV
-        echo "QML2_IMPORT_PATH=$QT_DIR/qml" >> $GITHUB_ENV
-
-    - name: Run linuxdeployqt to collect dependencies
-      run: |
-        cd linuxdeployqt-workdir
-        # 使用 linuxdeployqt 收集依赖
-        linuxdeployqt usr/share/applications/$APP_NAME.desktop -appimage -verbose=2
-        
-        # 如果直接运行失败，尝试使用提取的二进制文件
-        if [ $? -ne 0 ]; then
-          echo "linuxdeployqt failed, trying alternative approach..."
-          # 尝试使用 qmake 找到的 Qt 路径
-          QMAKE_PATH=$(which qmake)
-          if [ -n "$QMAKE_PATH" ]; then
-            QT_BIN_DIR=$(dirname "$QMAKE_PATH")
-            export PATH="$QT_BIN_DIR:$PATH"
-          fi
-          # 再次尝试运行
-          linuxdeployqt usr/share/applications/$APP_NAME.desktop -appimage -verbose=2
-        fi
-
-    - name: Create final AppImage
-      run: |
-        cd linuxdeployqt-workdir
-        # 确保 AppImage 已创建
-        if [ -f *.AppImage ]; then
-          mv *.AppImage ../$APP_NAME-$VERSION.AppImage
-          echo "AppImage created successfully"
-        else
-          echo "No AppImage found, packaging failed"
-          exit 1
-        fi
-
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: $APP_NAME-AppImage-${{ github.run_id }}
-        path: |
-          $APP_NAME-$VERSION.AppImage
-          build/$APP_NAME
-        if-no-files-found: error
+      # 第一步：克隆 linuxdeployqt 仓库
+      - name: Clone linuxdeployqt repository
+        run: |
+          git clone https://github.com/probonopd/linuxdeployqt.git
+          cd linuxdeployqt
+          git submodule update --init --recursive
