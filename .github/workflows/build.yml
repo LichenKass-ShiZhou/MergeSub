@@ -38,7 +38,7 @@ jobs:
         run: |
           cd linuxdeployqt/tools/linuxdeployqt
           # 在 CMakeLists.txt 文件开头添加 cmake_minimum_required(VERSION 3.31)
-          sed -i '1icmake_minimum_required(VERSION 3.31)' CMakeLists.tx
+          sed -i '1icmake_minimum_required(VERSION 3.31)' CMakeLists.txt
 
       # 第四步：构建项目
       - name: Build project
