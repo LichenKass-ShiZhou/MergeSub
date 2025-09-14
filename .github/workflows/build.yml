@@ -31,4 +31,4 @@ jobs:
         run: |
           cd linuxdeployqt/tools/linuxdeployqt
           # 使用 sed 命令注释掉指定的代码块
-          sed -i '/if (strverscmp (glcv, "2.36") >= 0) {/,/return 1;/ s/^/\/\//' main.cpp
+          sed -i '/if (strverscmp (glcv, "2.36") >= 0) {/,/^        }$/ s/^/\/\//' main.cpp
