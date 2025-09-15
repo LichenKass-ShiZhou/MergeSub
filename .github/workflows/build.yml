@@ -65,3 +65,20 @@ jobs:
           find appdir/
         env:
           QT_SELECT: ${{ env.QT_SELECT }}
+          
+
+      # 第六步：运行编译出的linuxdeployqt
+      - name: Run linuxdeployqt
+        run: |
+          cd linuxdeployqt/tools/linuxdeployqt
+          # 设置qmake路径环境变量
+          export QMAKE=${{ env.QMAKE_PATH }}
+          # 运行linuxdeployqt并显示版本信息
+          ./appdir/usr/bin/linuxdeployqt --version
+          # 测试简单的打包功能
+          mkdir -p test-app/usr/bin
+          echo '#!/bin/sh' > test-app/usr/bin/test-app
+          echo 'echo "Hello from test app"' >> test-app/usr/bin/test-app
+          chmod +x test-app/usr/bin/test-app
+          # 尝试使用linuxdeployqt打包测试应用
+          ./appdir/usr/bin/linuxdeployqt test-app/usr/bin/test-app -verbose=1
