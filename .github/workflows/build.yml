@@ -74,7 +74,21 @@ jobs:
           make DESTDIR=appdir -j$(nproc) install
           find appdir/
 
-      # 第六步：克隆并编译 MergeSub 项目 (使用QT6)
+      # 第六步：安装QT6和必要的依赖（包括quick和multimedia模块）
+      - name: Install QT6 and dependencies (including quick and multimedia)
+        run: |
+          sudo apt-get update
+          # 安装QT6基础开发包、quick模块、multimedia模块及其他可能需要的依赖
+          sudo apt-get install -y qt6-base-dev qt6-tools-dev qt6-tools-dev-tools 
+          sudo apt-get install -y qt6-quick-dev qt6-multimedia-dev  # 明确安装缺失的模块
+          sudo apt-get install -y libgl1-mesa-dev libxcb-xinerama0 libxkbcommon-dev
+          # 查找qmake的路径，优先查找qt6版本
+          QMAKE_PATH=$(which qmake6 || which qmake)  # 优先使用qmake6，其次使用qmake
+          echo "QMAKE_PATH=$QMAKE_PATH" >> $GITHUB_ENV
+          # 验证qmake版本
+          $QMAKE_PATH -v
+    
+      # 第七步：克隆并编译 MergeSub 项目 (使用QT6)
       - name: Clone and build MergeSub with QT6
         run: |
           git clone https://github.com/LichenKass-ShiZhou/MergeSub.git
@@ -86,7 +100,7 @@ jobs:
           ls -la
           file MergeSub  # 如果生成的可执行文件名为MergeSub
 
-      # 第七步（可选）：打包或上传制品
+      # 第八步（可选）：打包或上传制品
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
