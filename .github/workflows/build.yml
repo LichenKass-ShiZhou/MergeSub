@@ -274,3 +274,80 @@ jobs:
           # 列出 DEB 包结构
           echo "DEB package structure:"
           find deb-package -type f -print
+
+          
+      # 第十步：打包 DEB 文件并上传到 GitHub Release
+      - name: Build DEB package and upload to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 进入部署目录
+          cd MergeSub/deploy
+          
+          # 从 main.qml 文件中提取版本号 (确保使用相同的版本号)
+          VERSION=$(grep -oP 'mergeSubVersion:\s*"\K[^"]+' ../../main.qml 2>/dev/null | head -1 || echo "1.0.0")
+          echo "Using version: $VERSION"
+          
+          # 确保 deb-package 目录存在
+          if [ ! -d "deb-package" ]; then
+            echo "Error: deb-package directory not found!"
+            exit 1
+          fi
+          
+          # 构建 DEB 包
+          echo "Building DEB package..."
+          PACKAGE_NAME="com.github.mergesub_${VERSION}_amd64.deb"
+          dpkg-deb -b deb-package $PACKAGE_NAME
+          
+          # 检查 DEB 包是否成功创建
+          if [ ! -f "$PACKAGE_NAME" ]; then
+            echo "Error: DEB package creation failed!"
+            exit 1
+          fi
+          
+          echo "DEB package created: $PACKAGE_NAME"
+          ls -la $PACKAGE_NAME
+          
+          # 显示 DEB 包信息
+          echo "DEB package info:"
+          dpkg-deb -I $PACKAGE_NAME
+          
+          # 创建 GitHub Release 并上传 DEB 包
+          echo "Creating GitHub Release and uploading DEB package..."
+          
+          # 检查是否设置了 GITHUB_TOKEN
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "Error: GITHUB_TOKEN is not set!"
+            echo "Please create a personal access token with repo permissions and add it to your repository secrets."
+            exit 1
+          fi
+          
+          # 安装 ghr 工具 (用于上传到 GitHub Release)
+          echo "Installing ghr tool..."
+          GHR_VERSION="0.14.0"
+          wget -q https://github.com/tcnksm/ghr/releases/download/v${GHR_VERSION}/ghr_${GHR_VERSION}_linux_amd64.tar.gz
+          tar -xzf ghr_${GHR_VERSION}_linux_amd64.tar.gz
+          chmod +x ghr_${GHR_VERSION}_linux_amd64/ghr
+          
+          # 设置 git 用户信息 (避免 git 错误)
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # 创建标签并推送到 GitHub (如果尚未存在)
+          echo "Creating tag v${VERSION}..."
+          git tag -a "v${VERSION}" -m "Release version ${VERSION}" || echo "Tag may already exist"
+          git push origin "v${VERSION}" || echo "Tag push may have failed"
+          
+          # 使用 ghr 上传 DEB 包到 GitHub Release
+          echo "Uploading DEB package to GitHub Release..."
+          ./ghr_${GHR_VERSION}_linux_amd64/ghr -t ${GITHUB_TOKEN} -u ${GITHUB_REPOSITORY%/*} -r ${GITHUB_REPOSITORY#*/} -replace "v${VERSION}" $PACKAGE_NAME
+          
+          # Alternative: 使用 GitHub CLI (如果已安装)
+          # echo "Uploading DEB package using GitHub CLI..."
+          # gh release create "v${VERSION}" $PACKAGE_NAME --title "Release v${VERSION}" --notes "MergeSub version ${VERSION}"
+          
+          echo "DEB package successfully uploaded to GitHub Release!"
+          
+          # 显示 Release URL
+          REPO_NAME=${GITHUB_REPOSITORY#*/}
+          echo "Download URL: https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${PACKAGE_NAME}"
