@@ -166,3 +166,100 @@ jobs:
           # 列出最终收集到的所有库文件
           echo "Final library collection:"
           find . -name "*.so" -o -name "*.so.*" | sort
+
+          # 第九步：创建 DEB 包结构并使用 dpkg-shlibdeps 获取依赖
+      - name: Create DEB package structure and determine dependencies
+        run: |
+          # 进入部署目录
+          cd MergeSub/deploy
+          
+          # 从 main.qml 文件中提取版本号 (查找 mergeSubVersion 属性的值)
+          VERSION=$(grep -oP 'mergeSubVersion:\s*"\K[^"]+' ../../main.qml | head -1)
+          if [ -z "$VERSION" ]; then
+            VERSION="1.0.0"
+            echo "Warning: Version not found in main.qml, using default: $VERSION"
+          else
+            echo "Extracted version from main.qml: $VERSION"
+          fi
+          
+          # 创建 DEB 包的标准目录结构
+          mkdir -p deb-package/DEBIAN
+          mkdir -p deb-package/usr/bin
+          mkdir -p deb-package/usr/lib # 创建 lib 目录
+          mkdir -p deb-package/usr/share/applications
+          mkdir -p deb-package/usr/share/icons/hicolor/256x256/apps
+          
+          # 复制可执行文件到 DEB 包的 bin 目录
+          cp MergeSub deb-package/usr/bin/
+          chmod 755 deb-package/usr/bin/MergeSub
+          
+          # 🟢 关键操作：将第八步收集的 lib 文件夹内容覆盖到 deb-package/usr/lib/
+          # 先清理可能存在的旧库文件，然后复制新的库文件
+          echo "Copying collected libraries to deb-package/usr/lib/"
+          rm -rf deb-package/usr/lib/* # 清理目标目录，避免旧文件干扰
+          if [ -d "lib" ]; then
+            cp -r lib/* deb-package/usr/lib/
+            echo "Libraries copied:"
+            ls -la deb-package/usr/lib/ || echo "No libraries found in deb-package/usr/lib/"
+          else
+            echo "Warning: lib directory not found in deploy/. Did linuxdeployqt run successfully?"
+            # 即使 lib 目录不存在，也继续执行，但可能影响依赖检测
+          fi
+          
+          # 使用 echo 逐行创建桌面文件
+          echo "[Desktop Entry]" > deb-package/usr/share/applications/MergeSub.desktop
+          echo "Version=$VERSION" >> deb-package/usr/share/applications/MergeSub.desktop
+          echo "Name=MergeSub" >> deb-package/usr/share/applications/MergeSub.desktop
+          echo "GenericName=Subtitle Merger" >> deb-package/usr/share/applications/MergeSub.desktop
+          echo "Comment=Tool for merging subtitles" >> deb-package/usr/share/applications/MergeSub.desktop
+          echo "Exec=MergeSub" >> deb-package/usr/share/applications/MergeSub.desktop
+          echo "Icon=MergeSub" >> deb-package/usr/share/applications/MergeSub.desktop
+          echo "Terminal=false" >> deb-package/usr/share/applications/MergeSub.desktop
+          echo "Type=Application" >> deb-package/usr/share/applications/MergeSub.desktop
+          echo "Categories=Utility;" >> deb-package/usr/share/applications/MergeSub.desktop
+          
+          # 创建一个默认图标（如果需要）
+          # 这里创建一个简单的占位符图标
+          convert -size 256x256 xc:white -pointsize 30 -fill black -gravity center -annotate +0+0 "MS" deb-package/usr/share/icons/hicolor/256x256/apps/MergeSub.png 2>/dev/null || echo "ImageMagick not available, skipping icon creation"
+          
+          # 获取应用程序的依赖关系
+          echo "Determining package dependencies..."
+          cd deb-package
+          
+          # 使用 echo 逐行创建临时的 control 文件
+          echo "Package: com.github.mergesub" > DEBIAN/control
+          echo "Version: $VERSION" >> DEBIAN/control
+          echo "Architecture: amd64" >> DEBIAN/control
+          echo "Maintainer: LichenKass <yuanchengwei_sz@163.com>" >> DEBIAN/control
+          echo "Description: A tool for merging subtitles" >> DEBIAN/control
+          echo " A Qt-based application for merging subtitle files." >> DEBIAN/control
+          
+          # 🟢 关键操作：使用 dpkg-shlibdeps 分析依赖，并使用 -l 参数指定库目录
+          # --ignore-missing-info 选项允许在缺少某些信息的情况下继续:cite[4]:cite[5]
+          # -l 参数指定包含共享库的目录，这里指向我们复制库文件的 deb-package/usr/lib
+          echo "Running dpkg-shlibdeps with explicit library path..."
+          dpkg-shlibdeps -O usr/bin/MergeSub --ignore-missing-info -l./usr/lib 2>&1 | tee ../dependencies.log
+          
+          # 提取依赖信息
+          DEPENDS=$(dpkg-shlibdeps -O usr/bin/MergeSub --ignore-missing-info -l./usr/lib 2>/dev/null | sed 's/^shlibs:Depends=//')
+          echo "Detected dependencies: $DEPENDS"
+          
+          # 使用 echo 逐行创建最终的 control 文件
+          echo "Package: com.github.mergesub" > DEBIAN/control
+          echo "Version: $VERSION" >> DEBIAN/control
+          echo "Architecture: amd64" >> DEBIAN/control
+          echo "Maintainer: LichenKass <yuanchengwei_sz@163.com>" >> DEBIAN/control
+          echo "Depends: $DEPENDS" >> DEBIAN/control
+          echo "Description: A tool for merging subtitles" >> DEBIAN/control
+          echo " A Qt-based application for merging subtitle files." >> DEBIAN/control
+          
+          # 显示 control 文件内容
+          echo "Final control file:"
+          cat DEBIAN/control
+          
+          # 返回上级目录
+          cd ..
+          
+          # 列出 DEB 包结构
+          echo "DEB package structure:"
+          find deb-package -type f -print
