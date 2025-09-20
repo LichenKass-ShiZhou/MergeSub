@@ -100,9 +100,38 @@ jobs:
           ls -la
           file MergeSub  # 如果生成的可执行文件名为MergeSub
 
-      # 第八步（可选）：打包或上传制品
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: MergeSub-binary
-          path: MergeSub/MergeSub  # 根据实际生成的可执行文件名和路径调整
+       # 第八步：使用编译好的 linuxdeployqt 处理 MergeSub 以获取其依赖的共享库
+      - name: Deploy MergeSub and extract shared libraries using linuxdeployqt
+        run: |
+          # 进入 MergeSub 构建目录
+          cd MergeSub
+
+          # 创建一个专门用于部署的目录
+          mkdir -p deploy
+          # 复制 MergeSub 可执行文件到部署目录
+          cp MergeSub deploy/
+
+          # 进入部署目录
+          cd deploy
+
+          # 设置 QT 环境变量，确保 linuxdeployqt 能够找到 QT6 的相关库和插件
+          # 这里的路径可能需要根据你系统上 QT6 的实际安装位置进行调整
+          export PATH=/usr/lib/x86_64-linux-gnu/qt6/bin:$PATH
+          export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/qt6/lib:$LD_LIBRARY_PATH
+          export QT_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/qt6/plugins:$QT_PLUGIN_PATH
+          export QML2_IMPORT_PATH=/usr/lib/x86_64-linux-gnu/qt6/qml:$QML2_IMPORT_PATH
+
+          # 使用之前编译的 linuxdeployqt 处理 MergeSub 可执行文件。
+          # 使用 -appimage 参数会触发部署过程，但其最终目的是为了让我们获取依赖库，即使我们不生成最终的 AppImage。
+          # 注意：linuxdeployqt 会修改可执行文件中的库搜索路径，并将其依赖的库复制到当前目录（通常是 ./lib）下。
+          ../../linuxdeployqt/tools/linuxdeployqt/linuxdeployqt MergeSub -appimage
+
+          # 上述命令执行后，依赖的共享库（.so 文件）应该已经被复制到部署目录下的 lib 文件夹中。
+          # 你可以列出 lib 目录的内容进行验证。
+          echo "Contents of the lib directory:"
+          ls -la lib/ || echo "Lib directory might not exist yet, check for other locations or linuxdeployqt output."
+
+          # （可选）如果 linuxdeployqt 没有将库完全提取或你遇到问题，可以尝试使用 ldd 手动检查依赖
+          echo "Dependencies of MergeSub:"
+          ldd MergeSub
+
