@@ -80,7 +80,7 @@ jobs:
           sudo apt-get update
           # 安装QT6基础开发包、quick模块、multimedia模块及其他可能需要的依赖
           sudo apt-get install -y qt6-base-dev qt6-tools-dev qt6-tools-dev-tools 
-          sudo apt-get install -y qt6-quick-dev qt6-multimedia-dev  # 明确安装缺失的模块
+          sudo apt-get install -y qt6-multimedia-dev  # 明确安装缺失的模块
           sudo apt-get install -y libgl1-mesa-dev libxcb-xinerama0 libxkbcommon-dev
           # 查找qmake的路径，优先查找qt6版本
           QMAKE_PATH=$(which qmake6 || which qmake)  # 优先使用qmake6，其次使用qmake
