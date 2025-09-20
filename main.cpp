@@ -1,23 +1,31 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
-#include <ffmpeghandel.h>
+#include <ffmpegthreads.h>
+#include <QThread>
 #include <QQmlContext>
+#include "mergesubtranslation.h"
+
 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
 
+    ffmpegThreads FfmpegWorker;
     QQmlApplicationEngine engine;
-    ffmpeghandel ffmpeg_handel;
-    engine.rootContext()->setContextProperty("ffmpeghandel",&ffmpeg_handel);
-    qmlRegisterSingletonInstance("FfmpegHandel",1,0,"FfmpegHandel",ffmpeghandel::getInstance());
+    engine.rootContext()->setContextProperty("translator",MergeSubTranslation::getInstance(&engine));
+    engine.rootContext()->setContextProperty("FfmpegWorker",&FfmpegWorker);
+    qmlRegisterSingletonInstance("FfmpegWorker",1,0,"FfmpegWorker",ffmpegThreads::getInstance());
+    const QUrl url(QStringLiteral("qrc:/MergeSub/main.qml"));
     QObject::connect(
         &engine,
-        &QQmlApplicationEngine::objectCreationFailed,
+        &QQmlApplicationEngine::objectCreated,
         &app,
-        []() { QCoreApplication::exit(-1); },
+        [url](QObject *obj, const QUrl &objUrl) {
+            if (!obj && url == objUrl)
+                QCoreApplication::exit(-1);
+        },
         Qt::QueuedConnection);
-    engine.loadFromModule("MergeSub", "Main");
+    engine.load(url);
 
     return app.exec();
 }

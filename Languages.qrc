@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/">
+        <file>Languages/MergeSub_en_US.qm</file>
+        <file>Languages/MergeSub_zh_CN.qm</file>
+    </qresource>
+</RCC>
