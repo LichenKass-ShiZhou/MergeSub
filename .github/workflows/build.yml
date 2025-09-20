@@ -275,6 +275,15 @@ jobs:
           echo "DEB package structure:"
           find deb-package -type f -print
 
+      - name: Login to GitHub CLI
+        run: |
+          # 清除可能冲突的环境变量
+          unset GH_TOKEN
+          # 使用 GitHub Actions 内置的 GITHUB_TOKEN
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+          # 验证认证
+          gh auth status
+      
 
       # 第十一步：打包 DEB 文件并上传到 GitHub Release
       - name: Build DEB package and upload to GitHub Release
@@ -323,57 +332,15 @@ jobs:
           # 创建 GitHub Release 并上传 DEB 包
           echo "Creating GitHub Release and uploading DEB package..."
           
-          # 检查是否设置了 GITHUB_TOKEN
-          if [ -z "$GITHUB_TOKEN" ]; then
-            echo "Error: GITHUB_TOKEN is not set!"
-            echo "Please create a personal access token with repo permissions and add it to your repository secrets."
-            exit 1
-          fi
-          
-          # 设置 git 配置
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # 方法1: 使用 GitHub API 直接创建 Release 和上传资源
-          echo "使用 GitHub API 创建 Release 和上传资源..."
-          
-          # 检查 Release 是否已存在
-          RELEASE_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION")
-          
-          RELEASE_ID=$(echo "$RELEASE_RESPONSE" | grep -m 1 '"id":' | sed 's/[^0-9]*//g')
-          
-          if [ -z "$RELEASE_ID" ]; then
-            echo "创建新 Release..."
-            # 创建 Release
-            RELEASE_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github.v3+json" \
-              -H "Content-Type: application/json" \
-              -d "{\"tag_name\": \"v$VERSION\", \"name\": \"MergeSub v$VERSION\", \"body\": \"MergeSub subtitle tool version $VERSION\"}" \
-              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases")
+          - name: Create Release and Upload DEB
+          run: |
+            # 创建发布版
+            gh release create "v$VERSION" \
+              --title "MergeSub v$VERSION" \
+              --notes "Automated build release"
             
-            RELEASE_ID=$(echo "$RELEASE_RESPONSE" | grep -m 1 '"id":' | sed 's/[^0-9]*//g')
-          else
-            echo "Release 已存在，ID: $RELEASE_ID"
-          fi
-          
-          if [ -n "$RELEASE_ID" ]; then
-            echo "上传 DEB 包到 Release ID: $RELEASE_ID"
-            # 上传资源
-            UPLOAD_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github.v3+json" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary @"$PACKAGE_NAME" \
-              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$PACKAGE_NAME")
+            # 上传 DEB 包
+            gh release upload "v$VERSION" com.github.mergesub_*.deb --clobber
             
-            echo "上传响应: $UPLOAD_RESPONSE"
-          else
-            echo "错误: 无法创建或获取 Release ID"
-            exit 1
-          fi
-          
-          echo "DEB package successfully uploaded to GitHub Release!"
-          
-          # 显示 Release URL
-          echo "Download URL: https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${PACKAGE_NAME}"
+            # 显示 Release URL
+            echo "Download URL: https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${PACKAGE_NAME}"
