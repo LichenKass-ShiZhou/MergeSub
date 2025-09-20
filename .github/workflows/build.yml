@@ -1,4 +1,4 @@
-name: Build linuxdeployqt
+name: Build linuxdeployqt and MergeSub with QT6
 
 on:
   workflow_dispatch:
@@ -17,14 +17,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 第一步：克隆 linuxdeployqt 仓库并进入指定目录
+      # 第一步：安装 QT6 和必要的依赖
+      - name: Install QT6 and dependencies
+        run: |
+          sudo apt-get update
+          # 添加 QT6 官方仓库（如果需要更新版本的QT6，可考虑添加）
+          # sudo add-apt-repository ppa:beineri/opt-qt-6.0-xenial -y  # 根据Ubuntu版本调整
+          # sudo apt-get update
+
+          # 安装 QT6 基础开发包和其他可能需要的依赖
+          sudo apt-get install -y qt6-base-dev qt6-tools-dev qt6-tools-dev-tools 
+          sudo apt-get install -y libgl1-mesa-dev libxcb-xinerama0 libxkbcommon-dev
+          # 查找 qmake 的路径，优先查找 qt6 版本
+          QMAKE_PATH=$(which qmake6 || which qmake)  # 优先使用qmake6，其次使用qmake
+          echo "QMAKE_PATH=$QMAKE_PATH" >> $GITHUB_ENV
+          # 验证 qmake 版本
+          $QMAKE_PATH -v
+
+      # 第二步：克隆 linuxdeployqt 仓库并进入指定目录
       - name: Clone linuxdeployqt repository
         run: |
           git clone https://github.com/probonopd/linuxdeployqt.git
           cd linuxdeployqt/tools/linuxdeployqt
           git submodule update --init --recursive
-          
-      # 第二步：修复 main.cpp 中的语法错误
+
+      # 第三步：修复 main.cpp 中的语法错误
       - name: Fix main.cpp syntax errors
         run: |
           cd linuxdeployqt/tools/linuxdeployqt
@@ -32,7 +49,7 @@ jobs:
           git checkout -- main.cpp 
           sed -i '/if (strverscmp (glcv, "2.36") >= 0) {/,/^        }$/ s/^/\/\//' main.cpp
 
-      # 第三步：在 CMakeLists.txt 文件中添加 CMake 最低版本要求
+      # 第四步：在 CMakeLists.txt 文件中添加 CMake 最低版本要求
       - name: Add CMake minimum version requirement
         run: |
           cd linuxdeployqt/tools/linuxdeployqt
@@ -46,23 +63,32 @@ jobs:
               sed -i '/cmake_minimum_required/aproject(linuxdeployqt)' CMakeLists.txt
           fi
 
-      # 第四步：安装 Qt5 和必要的依赖
-      - name: Install Qt5 and dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qtbase5-dev qt5-qmake qtchooser qtbase5-dev-tools libgl1-mesa-dev
-          QMAKE_PATH=$(which qmake-qt5 || echo "/usr/lib/qt5/bin/qmake")
-          echo "QMAKE_PATH=$QMAKE_PATH" >> $GITHUB_ENV
-          echo "QT_SELECT=qt5" >> $GITHUB_ENV
-
-      # 第五步：构建项目
-      - name: Build project
+      # 第五步：构建 linuxdeployqt 项目 (尝试使用QT6环境，但注意linuxdeployqt可能对QT版本有特定要求)
+      - name: Build linuxdeployqt project
         run: |
           cd linuxdeployqt/tools/linuxdeployqt
-          cmake . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/usr/lib/x86_64-linux-gnu/qt5/
+          # 尝试配置和构建，注意设置QT6相关的路径（如果linuxdeployqt支持）
+          # 由于linuxdeployqt最初设计可能针对QT5，此处尝试使其适应QT6环境
+          cmake . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/usr/lib/x86_64-linux-gnu/qt6/
           make -j$(nproc)
           make DESTDIR=appdir -j$(nproc) install
           find appdir/
-        env:
-          QT_SELECT: ${{ env.QT_SELECT }}
-          
+
+      # 第六步：克隆并编译 MergeSub 项目 (使用QT6)
+      - name: Clone and build MergeSub with QT6
+        run: |
+          git clone https://github.com/LichenKass-ShiZhou/MergeSub.git
+          cd MergeSub
+          # 使用QT6的qmake生成Makefile
+          $QMAKE_PATH MergeSub.pro
+          make -j$(nproc)
+          # 验证生成的二进制文件（可选）
+          ls -la
+          file MergeSub  # 如果生成的可执行文件名为MergeSub
+
+      # 第七步（可选）：打包或上传制品
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MergeSub-binary
+          path: MergeSub/MergeSub  # 根据实际生成的可执行文件名和路径调整
