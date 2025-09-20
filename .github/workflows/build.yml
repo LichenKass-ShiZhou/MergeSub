@@ -285,62 +285,25 @@ jobs:
           gh auth status
       
 
-      # 第十一步：打包 DEB 文件并上传到 GitHub Release
-      - name: Build DEB package and upload to GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 第十步：打包 DEB 文件并上传到 GitHub Release
+      - name: Build DEB package
         run: |
-          # 进入部署目录
           cd MergeSub/deploy
-          
-          # 从之前步骤中获取版本号（避免再次提取失败）
-          # 如果之前步骤已成功设置版本号，可以直接使用
-          VERSION="1.0.0"  # 默认版本号
+          VERSION="1.0.0"
+          # 从control文件中提取版本号（如果之前步骤成功）
           if [ -f "deb-package/DEBIAN/control" ]; then
-            # 从已创建的 control 文件中提取版本号
             EXTRACTED_VERSION=$(grep -oP 'Version:\s*\K.*' deb-package/DEBIAN/control | head -1)
             if [ -n "$EXTRACTED_VERSION" ]; then
               VERSION="$EXTRACTED_VERSION"
             fi
           fi
           echo "Using version: $VERSION"
-          
-          # 确保 deb-package 目录存在
-          if [ ! -d "deb-package" ]; then
-            echo "Error: deb-package directory not found!"
-            exit 1
-          fi
-          
-          # 构建 DEB 包
-          echo "Building DEB package..."
-          PACKAGE_NAME="com.github.mergesub_${VERSION}_amd64.deb"
-          dpkg-deb -b deb-package $PACKAGE_NAME
-          
-          # 检查 DEB 包是否成功创建
-          if [ ! -f "$PACKAGE_NAME" ]; then
-            echo "Error: DEB package creation failed!"
-            exit 1
-          fi
-          
-          echo "DEB package created: $PACKAGE_NAME"
-          ls -la $PACKAGE_NAME
-          
-          # 显示 DEB 包信息
-          echo "DEB package info:"
-          dpkg-deb -I $PACKAGE_NAME
-          
-          # 创建 GitHub Release 并上传 DEB 包
-          echo "Creating GitHub Release and uploading DEB package..."
-          
-          - name: Create Release and Upload DEB
-          run: |
-            # 创建发布版
-            gh release create "v$VERSION" \
-              --title "MergeSub v$VERSION" \
-              --notes "Automated build release"
-            
-            # 上传 DEB 包
-            gh release upload "v$VERSION" com.github.mergesub_*.deb --clobber
-            
-            # 显示 Release URL
-            echo "Download URL: https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${PACKAGE_NAME}"
+          dpkg-deb -b deb-package com.github.mergesub_${VERSION}_amd64.deb
+          echo "DEB_PACKAGE_NAME=com.github.mergesub_${VERSION}_amd64.deb" >> $GITHUB_ENV
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: MergeSub/deploy/com.github.mergesub_${{ env.VERSION }}_amd64.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
